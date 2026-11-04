@@ -1,0 +1,4 @@
+name=春歌ナナ(連続音2023 ver.）
+image=image.bmp
+author=ななひら
+性別:女　年齢:10歳

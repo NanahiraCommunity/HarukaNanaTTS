@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+.gradle-home/
+build/
+out/
+local.properties
+
+# Compiled output (bin/ is written by IDE Java tooling such as VS Code / Eclipse JDT)
+bin/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Generated audio and voice packs (rebuild with :bankc:compileVoice / :cli:audition)
+*.wav
+!data/*.wav
+*.vpk
+samples/tuning/
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code: personal settings and internal state (shared settings.json stays tracked)
+.claude/settings.local.json
+.claude/.cc-writes/
