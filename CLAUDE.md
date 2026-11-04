@@ -17,6 +17,7 @@ gradle :core:selfTest -Ponly=kana   # tests whose name contains "kana"
 gradle :cli:run --args='-o out.wav --phonemes "Hello *world*~"'   # synthesise; --phonemes prints the kana plan
 gradle :cli:run --args='--knobs'    # list style knobs
 gradle :cli:audition            # render the style-comparison set to samples/tuning/<variant>/
+gradle :android:assembleDebug   # TTS engine APK → android/build/outputs/apk/debug/ (needs local.properties sdk.dir)
 gradle :wasm:assembleNode       # WebAssembly build → wasm/build/dist/; try: node wasm/build/dist/nana-tts.mjs -o x.wav "Hi"
 ```
 
@@ -26,6 +27,10 @@ gradle :wasm:assembleNode       # WebAssembly build → wasm/build/dist/; try: n
 - `core`, `bankc` and `cli` have no external dependencies, on purpose: they must work offline. The `wasm` module uses the
   TeaVM 0.16 Gradle plugin and its JSO API. Those come from Maven Central and the plugin portal, so in the sandbox the
   first `wasm` build has to run outside it (the user allowed this); afterwards they are cached in `.gradle-home`.
+- `android` (AGP 9.5, built-in Kotlin) is only included when `local.properties` has `sdk.dir` or `ANDROID_HOME` /
+  `ANDROID_SDK_ROOT` is set. The SDK here is `/opt/android-sdk` (read-only, so `buildToolsVersion` is pinned to the
+  installed 37.0.0). AGP and lint come from Google Maven (cached in `.gradle-home` now). Debug signing fails inside
+  the sandbox because AGP cannot lock `~/.android/debug.keystore`, so APK builds have to run outside it. `gradle check` also runs Android lint.
 - In the Claude sandbox, Maven Central and services.gradle.org are unreachable, so `./gradlew` cannot bootstrap. Use the
   system `gradle` with `--offline` and `GRADLE_USER_HOME=$PWD/.gradle-home` (without that, Gradle fails to load its
   native library).
@@ -37,6 +42,8 @@ Modules:
 - `core`: the library, Android-safe.
 - `bankc`: desktop-only voicebank compiler.
 - `cli`: desktop demo (`Say` and `Audition`).
+- `android`: system TTS engine app (`TextToSpeechService`) in Kotlin on top of `core`; see `android/README.md`.
+  R8 is enabled for debug too, because incremental D8 dropped the `RecordTag` synthetic that `core`'s records need.
 - `wasm`: TeaVM WasmGC build of `core` for Node. `wasm/.../NanaTts.java` exports `loadVoice`, `loadDictionary`,
   `speak` and `analyze`; `wasm/node/nana-tts.mjs` is the loader and CLI.
 

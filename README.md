@@ -24,9 +24,11 @@ text ─► normaliser ─► CMUdict / LTS G2P ─► ARPAbet→kana ─► pro
 ./gradlew check                 # self-tests (also compiles the voice pack)
 ./gradlew :core:jar             # core/build/libs/core-0.1.0.jar (~1 MB, includes CMUdict)
 ./gradlew :wasm:assembleNode    # WebAssembly build for Node.js → wasm/build/dist/
+./gradlew :android:assembleDebug  # Android TTS engine APK (needs an Android SDK, see below)
 ```
 
-The library build has no external dependencies. Only the `wasm` module needs TeaVM from Maven Central. Tests use a small built-in runner
+The library build has no external dependencies. Only the `wasm` module needs TeaVM from Maven Central, and
+the `android` module needs the Android Gradle Plugin from Google's Maven repository. Tests use a small built-in runner
 (`core/src/test/java/dev/nanatts/SelfTests.java`), not JUnit.
 
 ## Command line
@@ -127,6 +129,22 @@ tts.analyze("Hello world");                          // → [はろう わーる
 ```
 
 ## Android
+
+### TTS engine app
+
+The `android` module is a ready-made system TTS engine (`dev.nanatts.android`). After installation, select
+it under Settings → Text-to-speech output, and every app that uses the system TTS speaks with 春歌ナナ. It
+has two voices: `nana-en-US` (English with inline kana) and `nana-ja-JP` (kana).
+
+```sh
+echo "sdk.dir=$HOME/Android/Sdk" > local.properties   # or set ANDROID_HOME
+./gradlew :android:assembleDebug
+adb install android/build/outputs/apk/debug/android-debug.apk
+```
+
+Gradle includes the module only when an SDK is configured. See `android/README.md` for details.
+
+### Using the library in your own app
 
 1. Add the library, either as a module (`implementation(project(":core"))`) or as the jar. The jar already
    contains CMUdict as a Java resource.
