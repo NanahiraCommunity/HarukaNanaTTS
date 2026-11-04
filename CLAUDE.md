@@ -17,20 +17,28 @@ gradle :core:selfTest -Ponly=kana   # tests whose name contains "kana"
 gradle :cli:run --args='-o out.wav --phonemes "Hello *world*~"'   # synthesise; --phonemes prints the kana plan
 gradle :cli:run --args='--knobs'    # list style knobs
 gradle :cli:audition            # render the style-comparison set to samples/tuning/<variant>/
+gradle :wasm:assembleNode       # WebAssembly build → wasm/build/dist/; try: node wasm/build/dist/nana-tts.mjs -o x.wav "Hi"
 ```
 
 - There is no JUnit. Tests are plain methods registered with `run("name", ...)` in
   `core/src/test/java/dev/nanatts/SelfTests.java`, executed by the `selfTest` JavaExec task (`test` delegates to it).
   Add a test by writing a method and registering it in `main`.
-- The build has no external dependencies, on purpose: it must work offline. In the Claude sandbox, Maven Central and
-  services.gradle.org are unreachable, so `./gradlew` cannot bootstrap. Use the system `gradle` with
-  `--offline` and `GRADLE_USER_HOME=$PWD/.gradle-home` (without that, Gradle fails to load its native library).
+- `core`, `bankc` and `cli` have no external dependencies, on purpose: they must work offline. The `wasm` module uses the
+  TeaVM 0.16 Gradle plugin and its JSO API. Those come from Maven Central and the plugin portal, so in the sandbox the
+  first `wasm` build has to run outside it (the user allowed this); afterwards they are cached in `.gradle-home`.
+- In the Claude sandbox, Maven Central and services.gradle.org are unreachable, so `./gradlew` cannot bootstrap. Use the
+  system `gradle` with `--offline` and `GRADLE_USER_HOME=$PWD/.gradle-home` (without that, Gradle fails to load its
+  native library).
 - `bankc` also has a `RoundTrip` diagnostic (analyse → resynthesise one wav, reports level and spectral distance).
 
 ## Architecture
 
-Modules: `core` (the library, Android-safe), `bankc` (desktop-only voicebank compiler), `cli` (desktop demo,
-`Say` and `Audition`).
+Modules:
+- `core`: the library, Android-safe.
+- `bankc`: desktop-only voicebank compiler.
+- `cli`: desktop demo (`Say` and `Audition`).
+- `wasm`: TeaVM WasmGC build of `core` for Node. `wasm/.../NanaTts.java` exports `loadVoice`, `loadDictionary`,
+  `speak` and `analyze`; `wasm/node/nana-tts.mjs` is the loader and CLI.
 
 **Offline compile step (`bankc/VoiceCompiler`):** parses `oto.ini` (windows-31j). Per wav:
 - f0 via YIN constrained to ±1.6× the file median (the bank is sung at a level pitch);
@@ -76,6 +84,14 @@ Key cross-file facts:
   `java.nio.file`, `javax.sound`, `java.awt`, or Java 9+ API such as `List.of`/`Map.of`/`Set.of`/`String.isBlank`
   (use `g2p/Tables`). The `android-safe bytecode` self-test scans the class files and enforces this. Desktop-only code
   belongs in `bankc`/`cli`.
+- **WebAssembly-safe `core`:** TeaVM's class library is a subset of the JDK.
+  - Regex is an old Harmony port, so avoid `\\R` and other Java 8+ regex syntax.
+  - `java.text.Normalizer` is supplied by `wasm/src/main/java/org/teavm/classlib/java/text/TNormalizer.java`
+    (JS `String.normalize`). For any other missing JDK API, add a similar `org.teavm.classlib.java...T*` class there.
+    Nested types keep their names, and `@JSBody` must live in an ordinary class such as `JsText`.
+  - After changing `core`, rebuild with `:wasm:assembleNode`. Missing APIs fail the TeaVM build; runtime errors
+    (e.g. regex) only show when the module runs, so also run the loader. Set `obfuscated = false` in
+    `wasm/build.gradle.kts` to get readable wasm stack traces.
 - Resources are loaded through `io/ResourceSource` (Android supplies `AssetManager::open`), never via file paths.
 - Changing `Segment`/`VoicePack` serialisation requires bumping `VoicePack.VERSION` and recompiling the pack.
 - `-Werror` with `-Xlint:all` is on for all modules.

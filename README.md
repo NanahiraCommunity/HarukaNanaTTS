@@ -23,9 +23,10 @@ text ─► normaliser ─► CMUdict / LTS G2P ─► ARPAbet→kana ─► pro
 ./gradlew :bankc:compileVoice   # analyse data/ → bankc/build/voice/nana.vpk (~11 MB, ~10 s)
 ./gradlew check                 # self-tests (also compiles the voice pack)
 ./gradlew :core:jar             # core/build/libs/core-0.1.0.jar (~1 MB, includes CMUdict)
+./gradlew :wasm:assembleNode    # WebAssembly build for Node.js → wasm/build/dist/
 ```
 
-The build has no external dependencies and works offline. Tests use a small built-in runner
+The library build has no external dependencies. Only the `wasm` module needs TeaVM from Maven Central. Tests use a small built-in runner
 (`core/src/test/java/dev/nanatts/SelfTests.java`), not JUnit.
 
 ## Command line
@@ -75,6 +76,33 @@ pitch cap…).
 Tweak them in code with `StyleProfile.PLAYFUL.with("accentHeight", 6)`, or load a `.properties` file on top
 of a preset with `StyleProfile.PLAYFUL.load(in)`. `./gradlew :cli:audition` renders the test sentences in
 several variants to `samples/tuning/`, so you can compare them by ear.
+
+## Node.js (WebAssembly)
+
+The `wasm` module compiles the library to WebAssembly with [TeaVM](https://teavm.org) (WasmGC backend). The
+result needs Node 22 or newer.
+
+```sh
+./gradlew :wasm:assembleNode     # → wasm/build/dist/ (nana-tts.wasm, runtime, loader, nana.vpk, dictionary)
+node wasm/build/dist/nana-tts.mjs -o hello.wav "Hello! I love ラーメン~"
+node wasm/build/dist/nana-tts.mjs -l ja -s neutral -o ja.wav "こんにちは、はるかななです。"
+```
+
+```js
+import { createTts, toWav } from "./dist/nana-tts.mjs";
+import { writeFileSync } from "node:fs";
+
+const tts = await createTts();                     // loads module, voice pack and dictionary (~0.4 s)
+const { samples, sampleRate } = tts.speak("Hello *world*~", { style: "playful", pitch: 1, speed: 1 });
+writeFileSync("out.wav", toWav(samples, sampleRate));   // samples: Float32Array, 24 kHz mono
+console.log(tts.analyze("Hello world"));             // kana transcription
+```
+
+- **Speed:** about 0.04× real time (56 s of audio in 2 s).
+- **Memory:** about 200 MB RSS.
+- **Fidelity:** the output matches the JVM build to within floating-point rounding.
+- **Folder contents:** the `dist` folder is self-contained, so copy it wherever you need it.
+- **First build:** the first build downloads TeaVM from Maven Central.
 
 ## Library API
 

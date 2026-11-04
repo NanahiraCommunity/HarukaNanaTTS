@@ -1,3 +1,3 @@
 rootProject.name = "nana-tts"
 
-include("core", "bankc", "cli")
+include("core", "bankc", "cli", "wasm")

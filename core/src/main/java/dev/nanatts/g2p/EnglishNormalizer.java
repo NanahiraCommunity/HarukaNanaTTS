@@ -52,6 +52,9 @@ public final class EnglishNormalizer {
     private static final Set<String> WH_WORDS = Tables.set(
             "what", "where", "when", "why", "who", "whom", "whose", "which", "how");
 
+    /** Same as {@code \\R}, which older regex engines (TeaVM/WebAssembly) do not support. */
+    private static final String LINE_BREAK = "\\r\\n|[\\n\\r\\u000B\\u000C\\u0085\\u2028\\u2029]";
+
     private static final Pattern TOKEN = Pattern.compile(
             "(?<![\\w.])-(?=\\d)"                // minus sign
             + "|\\$\\d[\\d,]*(?:\\.\\d+)?"         // currency
@@ -61,7 +64,8 @@ public final class EnglishNormalizer {
             + "|[A-Za-z]+(?:\\.[A-Za-z])+\\.?"      // dotted abbreviation (e.g. U.S.A.)
             + "|[A-Za-z]+(?:['’][A-Za-z]+)*\\.?"    // word (with contraction, maybe abbreviation dot)
             + "|[\\u3041-\\u3096\\u30A1-\\u30FAー\\u30FC]+"  // hiragana / katakana word
-            + "|\\.\\.\\.|!+|[.,;:?…—–()\"。、]|\\R"   // punctuation
+            + "|\\.\\.\\.|!+|[.,;:?…—–()\"。、]"     // punctuation
+            + "|" + LINE_BREAK
             + "|[*~〜～♪♫]"                         // expressive cues (never spoken)
             + "|[&@+=%#°€£¥×]"                      // symbols
     );
@@ -90,7 +94,7 @@ public final class EnglishNormalizer {
                 continue;
             }
             if (tok.startsWith("!") || tok.length() == 1 && ".,;:?…—–()\"。、".indexOf(c0) >= 0 || tok.equals("...")
-                    || tok.matches("\\R")) {
+                    || isLineBreak(tok)) {
                 Phrase.Ending ending = tok.startsWith("!") ? Phrase.Ending.EXCLAMATION : endingFor(tok);
                 if (ending != null && !cur.words.isEmpty()) {
                     finish(cur, ending, tok);
@@ -181,6 +185,10 @@ public final class EnglishNormalizer {
         return Normalizer.normalize(sb, Normalizer.Form.NFC);
     }
 
+    private static boolean isLineBreak(String tok) {
+        return tok.equals("\r\n") || tok.length() == 1 && "\n\r\u000B\u000C\u0085\u2028\u2029".indexOf(tok.charAt(0)) >= 0;
+    }
+
     private static boolean isConjunction(String w) {
         return w.equals("and") || w.equals("but") || w.equals("because") || w.equals("so") || w.equals("or");
     }
@@ -206,7 +214,7 @@ public final class EnglishNormalizer {
             case ")":
                 return Phrase.Ending.CONTINUATION;
             default:
-                return p.matches("\\R") ? Phrase.Ending.STATEMENT : null;
+                return isLineBreak(p) ? Phrase.Ending.STATEMENT : null;
         }
     }
 
