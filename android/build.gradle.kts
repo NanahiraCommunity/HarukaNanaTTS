@@ -1,7 +1,7 @@
 // Android TTS engine app for the 春歌ナナ voice: see README.md in this folder.
 plugins {
     // AGP 9 has built-in Kotlin
-    id("com.android.application") version "9.5.0"
+    id("com.android.application")
 }
 
 repositories {
@@ -51,9 +51,8 @@ android {
     }
 
     buildTypes {
-        // R8 for every build type: core uses records, and incremental D8 dexing of a library
-        // dependency dropped the global synthetic com.android.tools.r8.RecordTag they extend
-        // (NoClassDefFoundError at runtime). R8 dexes the whole program at once and generates it.
+        // R8 for every build type. It was introduced because core used Java records, and incremental D8
+        // dexing dropped their RecordTag synthetic; core is Kotlin now, so this could be revisited.
         debug {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

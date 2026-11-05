@@ -48,7 +48,7 @@ class NanaEngine(private val resources: ResourceSource) : SpeechEngine {
         val voiceParams = VoiceParams.defaults()
             .speed(params.speechRate.coerceAtLeast(10) / 100.0)
             .pitch(params.pitch.coerceAtLeast(10) / 100.0)
-        if (!out.start(PcmFormat(tts.sampleRate()))) return
+        if (!out.start(PcmFormat(tts.sampleRate))) return
 
         // The library streams one clip per phrase; abort between phrases once stopped.
         try {

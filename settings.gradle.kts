@@ -8,7 +8,7 @@ pluginManagement {
 
 rootProject.name = "nana-tts"
 
-include("core", "bankc", "cli", "wasm")
+include("core", "bankc", "cli", "wasi")
 
 // The Android TTS engine app needs an Android SDK, so it is only part of the build when one is configured.
 val localSdk = file("local.properties").takeIf { it.isFile }?.let { f ->

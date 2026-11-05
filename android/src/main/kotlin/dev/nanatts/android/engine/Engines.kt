@@ -1,6 +1,8 @@
 package dev.nanatts.android.engine
 
 import android.content.Context
+import dev.nanatts.io.ResourceSource
+import dev.nanatts.io.streams
 
 /** Single place to choose the engine implementation. */
 object Engines {
@@ -11,5 +13,5 @@ object Engines {
             instance ?: create(context.applicationContext).also { instance = it }
         }
 
-    private fun create(context: Context): SpeechEngine = NanaEngine(context.assets::open)
+    private fun create(context: Context): SpeechEngine = NanaEngine(ResourceSource.streams(context.assets::open))
 }

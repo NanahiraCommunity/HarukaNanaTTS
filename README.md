@@ -2,14 +2,19 @@
 
 **Completely vibed offline TTS engine.**
 
-Offline text-to-speech in pure Java, using the **春歌ナナ (Haruka Nana) 連続音 2023** UTAU voicebank in `data/`.
+Offline text-to-speech in pure Kotlin, using the **春歌ナナ (Haruka Nana) 連続音 2023** UTAU voicebank in `data/`.
 English text is supported now, including hiragana/katakana words mixed into it. Japanese kana input works,
 and kanji will come later.
 
 It is a concatenative VCV synthesiser built on a WORLD-style vocoder. There is no neural network, nothing runs
-natively, and there are no runtime dependencies. The library targets **Java 17 bytecode** and avoids
-`javax.sound`, AWT, `java.nio.file` and Java 9+ collection factories, so it can be dropped into an Android app
-as is.
+natively, and there are no runtime dependencies besides the Kotlin standard library. The library is Kotlin
+Multiplatform with two targets from the same code:
+
+- **JVM / Android:** Java 17 bytecode without `javax.sound`, AWT, `java.nio.file` or Java 9+ collection factories, so
+  it can be dropped into an Android app as is.
+- **WebAssembly (WASI):** a standalone module that runs in wasmtime or any other WASI runtime with WasmGC support.
+
+Both targets produce bit-identical audio.
 
 ```
 text ─► normaliser ─► CMUdict / LTS G2P ─► ARPAbet→kana ─► prosody ─► VCV unit renderer ─► WORLD synthesis ─► PCM
@@ -22,14 +27,14 @@ text ─► normaliser ─► CMUdict / LTS G2P ─► ARPAbet→kana ─► pro
 ```sh
 ./gradlew :bankc:compileVoice   # analyse data/ → bankc/build/voice/nana.vpk (~11 MB, ~10 s)
 ./gradlew check                 # self-tests (also compiles the voice pack)
-./gradlew :core:jar             # core/build/libs/core-0.1.0.jar (~1 MB, includes CMUdict)
-./gradlew :wasm:assembleNode    # WebAssembly build for Node.js → wasm/build/dist/
+./gradlew :core:jvmJar          # core/build/libs/core-jvm-0.1.0.jar (includes CMUdict)
+./gradlew :wasi:assembleWasi    # standalone WebAssembly (WASI) build → wasi/build/dist/
 ./gradlew :android:assembleDebug  # Android TTS engine APK (needs an Android SDK, see below)
 ```
 
-The library build has no external dependencies. Only the `wasm` module needs TeaVM from Maven Central, and
-the `android` module needs the Android Gradle Plugin from Google's Maven repository. Tests use a small built-in runner
-(`core/src/test/java/dev/nanatts/SelfTests.java`), not JUnit.
+The build needs the Kotlin Gradle plugin from Maven Central, and the `android` module needs the Android Gradle Plugin
+from Google's Maven repository. Tests use a small built-in runner (`core/src/jvmTest/kotlin/dev/nanatts/SelfTests.kt`),
+not JUnit.
 
 ## Command line
 
@@ -76,57 +81,51 @@ real syllable (the と of "twinkle") are a pickup. `♪` phrases are always full
 A style is a set of numeric knobs (accent height, density, stretch, scale snapping, rhythm, ending shapes,
 pitch cap…).
 Tweak them in code with `StyleProfile.PLAYFUL.with("accentHeight", 6)`, or load a `.properties` file on top
-of a preset with `StyleProfile.PLAYFUL.load(in)`. `./gradlew :cli:audition` renders the test sentences in
+of a preset with `StyleProfile.PLAYFUL.load(text)`. `./gradlew :cli:audition` renders the test sentences in
 several variants to `samples/tuning/`, so you can compare them by ear.
 
-## Node.js (WebAssembly)
+## WebAssembly (WASI)
 
-The `wasm` module compiles the library to WebAssembly with [TeaVM](https://teavm.org) (WasmGC backend). The
-result needs Node 22 or newer.
+The `wasi` module compiles the library to a standalone WebAssembly module (Kotlin/Wasm, WASI preview 1). It needs a
+runtime with WasmGC and exception handling (tested with wasmtime 50 and with Node.js 22 through `node:wasi`).
+Files are read from and written to preopened directories.
 
 ```sh
-./gradlew :wasm:assembleNode     # → wasm/build/dist/ (nana-tts.wasm, runtime, loader, nana.vpk, dictionary)
-node wasm/build/dist/nana-tts.mjs -o hello.wav "Hello! I love ラーメン~"
-node wasm/build/dist/nana-tts.mjs -l ja -s neutral -o ja.wav "こんにちは、はるかななです。"
+./gradlew :wasi:assembleWasi     # → wasi/build/dist/ (nana-tts.wasm, nana.vpk, cmudict.tsv.gz)
+wasmtime run --dir wasi/build/dist::/ wasi/build/dist/nana-tts.wasm -o /hello.wav "Hello! I love ラーメン~"
+echo "こんにちは、はるかななです。" | wasmtime run --dir wasi/build/dist::/ wasi/build/dist/nana-tts.wasm -l ja -f - > ja.wav
 ```
 
-```js
-import { createTts, toWav } from "./dist/nana-tts.mjs";
-import { writeFileSync } from "node:fs";
+The options are the same as for the JVM command line, except that `-o` defaults to standard output (`-o -`) and
+there is no playback. `--` ends the options, so text starting with `-` can follow it.
 
-const tts = await createTts();                     // loads module, voice pack and dictionary (~0.4 s)
-const { samples, sampleRate } = tts.speak("Hello *world*~", { style: "playful", pitch: 1, speed: 1 });
-writeFileSync("out.wav", toWav(samples, sampleRate));   // samples: Float32Array, 24 kHz mono
-console.log(tts.analyze("Hello world"));             // kana transcription
-```
-
-- **Speed:** about 0.04× real time (56 s of audio in 2 s).
-- **Memory:** about 200 MB RSS.
-- **Fidelity:** the output matches the JVM build to within floating-point rounding.
+- **Speed:** about 0.5× real time in wasmtime (about 0.2× in Node.js). Kotlin/Wasm computes `exp`, `ln`, `sin` and
+  `cos` in software, and the vocoder needs millions of them.
+- **Memory:** about 150 MB RSS.
+- **Fidelity:** the output is bit-identical to the JVM build.
 - **Folder contents:** the `dist` folder is self-contained, so copy it wherever you need it.
-- **First build:** the first build downloads TeaVM from Maven Central.
 
 ## Library API
 
-```java
-VoicePack pack;
-try (InputStream in = new FileInputStream("nana.vpk")) {
-    pack = VoicePack.read(in);                       // load once and share; it is immutable
-}
-Synthesizer tts = Synthesizer.builder(pack)
-        .language(Language.ENGLISH)                  // or Language.JAPANESE_KANA
-        .sampleRate(24000)
-        .build();                                    // thread-safe
+```kotlin
+val pack = VoicePack.read(File("nana.vpk").readBytes())  // load once and share; it is immutable
+val tts = Synthesizer.builder(pack)
+    .language(Language.ENGLISH)                          // or Language.JAPANESE_KANA
+    .sampleRate(24000)
+    .build()                                             // thread-safe
 
-AudioClip clip = tts.speak("Hello! How are you *today*?",
-        VoiceParams.defaults().style(StyleProfile.PLAYFUL).pitch(1.0).speed(1.1));
-WavIO.write(clip, outputStream);                    // or clip.toPcm16()
+val clip = tts.speak("Hello! How are you *today*?",
+    VoiceParams.defaults().style(StyleProfile.PLAYFUL).pitch(1.0).speed(1.1))
+File("out.wav").writeBytes(WavIO.encode(clip))          // or clip.toPcm16()
 
 // low latency: one callback per phrase, so playback can start before the whole text is synthesised
-tts.speak(longText, VoiceParams.defaults(), phraseClip -> play(phraseClip.toPcm16()));
+tts.speak(longText, VoiceParams.defaults()) { phraseClip -> play(phraseClip.toPcm16()) }
 
-tts.analyze("Hello world");                          // → [はろう わーるど [STATEMENT]] for debugging
+tts.analyze("Hello world")                               // → [はろう わーるど [STATEMENT]] for debugging
 ```
+
+Resources are loaded through `ResourceSource` (`ResourceSource.classpath()`, `directory(dir)` or
+`streams(open)` on the JVM).
 
 ## Android
 
@@ -146,25 +145,25 @@ Gradle includes the module only when an SDK is configured. See `android/README.m
 
 ### Using the library in your own app
 
-1. Add the library, either as a module (`implementation(project(":core"))`) or as the jar. The jar already
-   contains CMUdict as a Java resource.
+1. Add the library, either as a module (`implementation(project(":core"))`) or as the JVM jar plus the Kotlin
+   standard library. The jar already contains CMUdict as a Java resource.
 2. Copy `bankc/build/voice/nana.vpk` to `app/src/main/assets/`. It is already gzip-compressed, so add
    `androidResources { noCompress += "vpk" }`.
 3. Load the pack once, off the main thread:
 
-```java
-VoicePack pack = VoicePack.load(name -> context.getAssets().open(name), "nana.vpk");
-Synthesizer tts = Synthesizer.builder(pack).build();
+```kotlin
+val pack = VoicePack.load(ResourceSource.streams(context.assets::open), "nana.vpk")
+val tts = Synthesizer.builder(pack).build()
 
-AudioTrack track = new AudioTrack.Builder()
-        .setAudioFormat(new AudioFormat.Builder().setSampleRate(tts.sampleRate())
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-        .setTransferMode(AudioTrack.MODE_STREAM).build();
-track.play();
-tts.speak(text, VoiceParams.defaults(), clip -> {
-    short[] pcm = clip.toPcm16();
-    track.write(pcm, 0, pcm.length);
-});
+val track = AudioTrack.Builder()
+    .setAudioFormat(AudioFormat.Builder().setSampleRate(tts.sampleRate)
+        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+    .setTransferMode(AudioTrack.MODE_STREAM).build()
+track.play()
+tts.speak(text, VoiceParams.defaults()) { clip ->
+    val pcm = clip.toPcm16()
+    track.write(pcm, 0, pcm.size)
+}
 ```
 
 Expected resource use:

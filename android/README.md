@@ -28,9 +28,9 @@ adb install android/build/outputs/apk/debug/android-debug.apk
 
 - **SDK:** the module needs platform `android-37` and build-tools `37.0.0`. `buildToolsVersion` is pinned,
   so AGP does not try to install a different version into the SDK.
-- **AGP:** version 9.5.0 is declared in this module's `plugins {}` block, not in the root build, so only
-  builds that include the module download it. AGP 9 has built-in Kotlin.
-- **javac settings:** the root `subprojects {}` block (`release = 17`, `-Werror`) skips this module.
+- **AGP:** version 9.5.0 is declared in the root build (`apply false`) next to the Kotlin Gradle plugin. AGP 9 has
+  built-in Kotlin, and with both plugins on different class loaders AGP fails to create its Kotlin target.
+- **Compiler settings:** the root `subprojects {}` block (`jvmTarget = 17`, warnings as errors) skips this module.
   AGP configures its own compile tasks.
 - **Voice pack:** `copyVoicePack` depends on `:bankc:compileVoice` and adds `nana.vpk` to the
   generated assets uncompressed. CMUdict comes in through `:core`'s Java resources.
@@ -39,8 +39,8 @@ adb install android/build/outputs/apk/debug/android-debug.apk
 
 ## Why R8 is on for debug builds
 
-`core` uses records. With minSdk < 34, D8 rewrites records to extend the synthetic
+`core` used Java records before it was ported to Kotlin. With minSdk < 34, D8 rewrites records to extend the synthetic
 `com.android.tools.r8.RecordTag`. When D8 dexed core incrementally as a dependency, that
 class was missing from the APK, and the app crashed with `NoClassDefFoundError` on the first
 `VoicePack` load. R8 dexes the whole program at once and generates it, and `-dontobfuscate`
-keeps stack traces readable.
+keeps stack traces readable. `core` has no records any more, so this could be revisited.

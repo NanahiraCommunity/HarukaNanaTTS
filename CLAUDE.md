@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An offline, pure-Java TTS library that speaks English (plus hiragana/katakana, inline or as pure Japanese
+An offline, pure-Kotlin TTS library that speaks English (plus hiragana/katakana, inline or as pure Japanese
 kana input) with the 春歌ナナ UTAU voicebank in `data/`. It concatenates Japanese VCV units and synthesises
-them with a WORLD-style vocoder. Target: embeddable in an Android APK. See `README.md` for user-facing usage.
+them with a WORLD-style vocoder. `core` is Kotlin Multiplatform: a JVM target (embeddable in an Android APK) and a
+standalone WebAssembly (WASI) target, which produce bit-identical audio. See `README.md` for user-facing usage.
 
 ## Commands
 
@@ -18,15 +19,16 @@ gradle :cli:run --args='-o out.wav --phonemes "Hello *world*~"'   # synthesise; 
 gradle :cli:run --args='--knobs'    # list style knobs
 gradle :cli:audition            # render the style-comparison set to samples/tuning/<variant>/
 gradle :android:assembleDebug   # TTS engine APK → android/build/outputs/apk/debug/ (needs local.properties sdk.dir)
-gradle :wasm:assembleNode       # WebAssembly build → wasm/build/dist/; try: node wasm/build/dist/nana-tts.mjs -o x.wav "Hi"
+gradle :wasi:assembleWasi       # WASI build → wasi/build/dist/; try: wasmtime run --dir wasi/build/dist::/ wasi/build/dist/nana-tts.wasm -o /x.wav "Hi"
+gradle :core:generateUnicodeData   # regenerate core/.../text/UnicodeData.kt from the build JDK's java.text.Normalizer
 ```
 
-- There is no JUnit. Tests are plain methods registered with `run("name", ...)` in
-  `core/src/test/java/dev/nanatts/SelfTests.java`, executed by the `selfTest` JavaExec task (`test` delegates to it).
-  Add a test by writing a method and registering it in `main`.
-- `core`, `bankc` and `cli` have no external dependencies, on purpose: they must work offline. The `wasm` module uses the
-  TeaVM 0.16 Gradle plugin and its JSO API. Those come from Maven Central and the plugin portal, so in the sandbox the
-  first `wasm` build has to run outside it (the user allowed this); afterwards they are cached in `.gradle-home`.
+- There is no JUnit. Tests are plain functions registered with `run("name", ...)` in
+  `core/src/jvmTest/kotlin/dev/nanatts/SelfTests.kt`, executed on the JVM by the `selfTest` JavaExec task (`jvmTest`
+  delegates to it). Add a test by writing a function and registering it in `main`. The WASI build has no test runner;
+  check it by comparing its output with the JVM build (it must be bit-identical).
+- The modules have no library dependencies besides the Kotlin standard library. The Kotlin Gradle plugin (2.4.21) comes
+  from Maven Central; offline builds need it in the Gradle cache.
 - `android` (AGP 9.5, built-in Kotlin) is only included when `local.properties` has `sdk.dir` or `ANDROID_HOME` /
   `ANDROID_SDK_ROOT` is set. The SDK here is `/opt/android-sdk` (read-only, so `buildToolsVersion` is pinned to the
   installed 37.0.0). AGP and lint come from Google Maven (cached in `.gradle-home` now). Debug signing fails inside
@@ -39,13 +41,16 @@ gradle :wasm:assembleNode       # WebAssembly build → wasm/build/dist/; try: n
 ## Architecture
 
 Modules:
-- `core`: the library, Android-safe.
-- `bankc`: desktop-only voicebank compiler.
-- `cli`: desktop demo (`Say` and `Audition`).
+- `core`: the library (Kotlin Multiplatform). Almost everything is in `commonMain`; `jvmMain` has the classpath
+  dictionary, `ResourceSource` helpers, pack writing and the `oto.ini` parser (windows-31j, bankc only);
+  `wasmWasiMain` has minimal WASI bindings (`wasi/Wasi`: args, stdio, files in preopened directories, exit).
+- `bankc`: desktop-only voicebank compiler (Kotlin/JVM).
+- `cli`: desktop demo (`Say` and `Audition`, Kotlin/JVM).
+- `wasi`: the WASI command line (`Main.kt`), built with `:wasi:assembleWasi` into `wasi/build/dist` together with the
+  voice pack and dictionary.
 - `android`: system TTS engine app (`TextToSpeechService`) in Kotlin on top of `core`; see `android/README.md`.
-  R8 is enabled for debug too, because incremental D8 dropped the `RecordTag` synthetic that `core`'s records need.
-- `wasm`: TeaVM WasmGC build of `core` for Node. `wasm/.../NanaTts.java` exports `loadVoice`, `loadDictionary`,
-  `speak` and `analyze`; `wasm/node/nana-tts.mjs` is the loader and CLI.
+  R8 is enabled for debug too: incremental D8 dropped the `RecordTag` synthetic the former Java records needed.
+  AGP is declared in the root build next to the Kotlin plugin so both share a class loader.
 
 **Offline compile step (`bankc/VoiceCompiler`):** parses `oto.ini` (windows-31j). Per wav:
 - f0 via YIN constrained to ±1.6× the file median (the bank is sung at a level pitch);
@@ -87,27 +92,29 @@ Key cross-file facts:
 
 ## Constraints to preserve
 
-- **Android-safe `core`:** Java 17 bytecode (`options.release = 17`), `-XDstringConcat=inline`, and none of
-  `java.nio.file`, `javax.sound`, `java.awt`, or Java 9+ API such as `List.of`/`Map.of`/`Set.of`/`String.isBlank`
-  (use `g2p/Tables`). The `android-safe bytecode` self-test scans the class files and enforces this. Desktop-only code
-  belongs in `bankc`/`cli`.
-- **WebAssembly-safe `core`:** TeaVM's class library is a subset of the JDK.
-  - Regex is an old Harmony port, so avoid `\\R` and other Java 8+ regex syntax.
-  - `java.text.Normalizer` is supplied by `wasm/src/main/java/org/teavm/classlib/java/text/TNormalizer.java`
-    (JS `String.normalize`). For any other missing JDK API, add a similar `org.teavm.classlib.java...T*` class there.
-    Nested types keep their names, and `@JSBody` must live in an ordinary class such as `JsText`.
-  - After changing `core`, rebuild with `:wasm:assembleNode`. Missing APIs fail the TeaVM build; runtime errors
-    (e.g. regex) only show when the module runs, so also run the loader. Set `obfuscated = false` in
-    `wasm/build.gradle.kts` to get readable wasm stack traces.
-- Resources are loaded through `io/ResourceSource` (Android supplies `AssetManager::open`), never via file paths.
+- **Android-safe JVM target:** Java 17 bytecode and API (`jvmTarget = 17`, `-Xjdk-release=17`),
+  `-Xstring-concat=inline`, and none of `java.nio.file`, `javax.sound`, `java.awt`, or Java 9+ API such as
+  `List.of`/`String.isBlank`. The `android-safe bytecode` self-test scans the class files and enforces this.
+  Desktop-only code belongs in `bankc`/`cli`.
+- **Platform-neutral `commonMain`:** no JDK API. The pieces that replace it must keep JVM and WASI output identical:
+  - `util/JavaRandom` is `java.util.Random` (seeded variation must not change); `util/JavaCompat` has Java's
+    `Math.round`, `String.hashCode` (it seeds each phrase), `Character.isWhitespace` and `String.split` semantics.
+  - `text/Normalizer` implements NFC/NFD/NFKC/NFKD with tables generated from the JDK
+    (`gradle :core:generateUnicodeData`); a self-test compares every code point with `java.text.Normalizer`.
+  - `io/Gzip` inflates voice packs and the dictionary; `io/ByteReader` reads the `DataOutputStream` format.
+  - Keep Java's float/double arithmetic order (e.g. `Segment.f0` divides in float) when porting or refactoring.
+- Kotlin/Wasm computes `exp`/`ln`/`sin`/`cos` in software (about 17× slower than the JVM), which dominates WASI
+  synthesis time.
+- Resources are loaded through `io/ResourceSource` (Android: `ResourceSource.streams(assets::open)`), never via file
+  paths. On WASI, `bundledDictionary()` reads `cmudict.tsv.gz` from the preopened directory.
 - Changing `Segment`/`VoicePack` serialisation requires bumping `VoicePack.VERSION` and recompiling the pack.
-- `-Werror` with `-Xlint:all` is on for all modules.
+- `allWarningsAsErrors` is on for all Kotlin modules except `android`.
 
 ## Verifying audio changes
 
 Nobody can listen inside the sandbox, so verify with measurements and treat listening as the user's job:
 - spectrograms (`ffmpeg -i x.wav -lavfi showspectrumpic=s=1000x400:legend=0:scale=log x.png`, then read the image);
-- frame-level checks on `ParamTrack` (level steps, voicing flips, f0 in semitones vs `pack.medianF0()`).
+- frame-level checks on `ParamTrack` (level steps, voicing flips, f0 in semitones vs `pack.medianF0`).
 
 Do not judge pops by counting audio-domain clicks: that metric counts ordinary glottal pulses and depends on pitch.
 Samples for the user go in `samples/`.
